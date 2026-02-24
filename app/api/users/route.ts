@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 // In-memory store (replace with a real DB in production)
 export const users: { id: string; name: string }[] = [
-    { id: "1", name: "Alice" },
-    { id: "2", name: "Bob" },
+    // { id: "1", name: "Alice" },
+    // { id: "2", name: "Bob" },
 ];
 
 // GET /api/users

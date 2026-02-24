@@ -17,6 +17,9 @@ import {
   For,
 } from "@chakra-ui/react";
 
+// sessionStorage is tab-scoped: each tab has its own independent user session
+const STORAGE_KEY = "socket_user_id";
+
 export default function Home() {
   const [userId, setUserId] = useState("");
   const [inputValue, setInputValue] = useState("");
@@ -25,16 +28,8 @@ export default function Home() {
   const [connecting, setConnecting] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
-    };
-  }, []);
-
-  const handleConnect = async () => {
-    const trimmed = inputValue.trim();
+  const connectUser = async (id: string) => {
+    const trimmed = id.trim();
     if (!trimmed) return;
 
     setConnecting(true);
@@ -64,6 +59,8 @@ export default function Home() {
         setConnected(true);
         setConnecting(false);
         setUserId(trimmed);
+        setInputValue(trimmed);
+        sessionStorage.setItem(STORAGE_KEY, trimmed); // persist
         socketRef.current!.emit("register", trimmed);
       });
 
@@ -81,10 +78,14 @@ export default function Home() {
       });
     } else {
       setUserId(trimmed);
+      setInputValue(trimmed);
+      sessionStorage.setItem(STORAGE_KEY, trimmed); // persist
       socketRef.current.emit("register", trimmed);
       setConnecting(false);
     }
   };
+
+  const handleConnect = () => connectUser(inputValue);
 
   const handleDisconnect = async () => {
     // Remove user from the API store
@@ -97,6 +98,8 @@ export default function Home() {
         console.error("API error on disconnect:", err);
       }
     }
+
+    sessionStorage.removeItem(STORAGE_KEY); // clear persisted state
 
     if (socketRef.current) {
       socketRef.current.disconnect();
@@ -134,7 +137,7 @@ export default function Home() {
                     }}
                     disabled={connected}
                     size="lg"
-                    focusBorderColor="teal.500"
+                    _focus={{ borderColor: "teal.500" }}
                   />
                   {!connected ? (
                     <Button
