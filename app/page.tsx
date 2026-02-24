@@ -55,14 +55,19 @@ export default function Home() {
     if (!socketRef.current) {
       socketRef.current = io(window.location.origin);
 
-      socketRef.current.on("connect", () => {
+      // Fires on first connection AND after every automatic reconnect
+      const onConnected = () => {
         setConnected(true);
         setConnecting(false);
         setUserId(trimmed);
         setInputValue(trimmed);
-        sessionStorage.setItem(STORAGE_KEY, trimmed); // persist
+        sessionStorage.setItem(STORAGE_KEY, trimmed);
         socketRef.current!.emit("register", trimmed);
-      });
+      };
+
+      socketRef.current.on("connect", onConnected);
+      // Socket.IO reconnect fires after the transport reconnects
+      socketRef.current.on("reconnect", onConnected);
 
       socketRef.current.on("users", (userList: string[]) => {
         setUsers(userList);
@@ -79,7 +84,7 @@ export default function Home() {
     } else {
       setUserId(trimmed);
       setInputValue(trimmed);
-      sessionStorage.setItem(STORAGE_KEY, trimmed); // persist
+      sessionStorage.setItem(STORAGE_KEY, trimmed);
       socketRef.current.emit("register", trimmed);
       setConnecting(false);
     }
