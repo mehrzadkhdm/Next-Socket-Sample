@@ -41,6 +41,7 @@ app.prepare().then(() => {
 
     const tabSessions = new Map<string, TabSession>();
     const tabToUser = new Map<string, string>();
+    const userToSocket = new Map<string, Socket>(); // Map userId to their socket
 
 
     io.on("connection", (socket) => {
@@ -81,9 +82,22 @@ app.prepare().then(() => {
             session.rooms.push(room);
         });
 
+        socket.on("sendMessage", (data: { to: string; text: string; from: string }) => {
+            const recipientSocket = userToSocket.get(data.to);
+            
+            // Only send to recipient, sender already added locally
+            if (recipientSocket) {
+                recipientSocket.emit("receiveMessage", {
+                    from: data.from,
+                    text: data.text,
+                    timestamp: Date.now(),
+                });
+            }
+        });
 
         socket.on("register", (userId: string) => {
             tabToUser.set(socket.data.tabSessionId, userId);
+            userToSocket.set(userId, socket); // Map user to socket for messaging
             //socketToUser.set(socket.id, userId);
 
             // Cancel any pending removal for this user (tab-switch reconnect)
@@ -108,6 +122,7 @@ app.prepare().then(() => {
             // tab is truly gone.
             console.log(`Socket disconnected: ${socket.id} (user: ${userId})`);
             if (userId) {
+                userToSocket.delete(userId); // Clean up user->socket mapping
                 console.log(`Socket lost for: ${userId} — waiting ${GRACE_MS}ms before removing`);
                 // Delay removal to allow page-refresh reconnects on the same tab
                 const timer = setTimeout(() => {

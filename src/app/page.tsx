@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 import {
   Box,
@@ -16,6 +16,18 @@ import {
   Separator,
   For,
 } from "@chakra-ui/react";
+import { ChatWindow } from "../../components/ChatWindow";
+
+interface ChatMessage {
+  from: string;
+  text: string;
+  timestamp: number;
+}
+
+interface ChatSession {
+  messages: ChatMessage[];
+  open: boolean;
+}
 
 // sessionStorage is tab-scoped: each tab has its own independent user session
 const STORAGE_KEY = "socket_user_id";
@@ -30,6 +42,7 @@ export default function Home() {
   const [users, setUsers] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [chats, setChats] = useState<Map<string, ChatSession>>(new Map());
   const socketRef = useRef<Socket | null>(null);
 
   const connectUser = async (id: string) => {
@@ -92,6 +105,21 @@ export default function Home() {
         setUsers(userList);
       });
 
+      // Listen for incoming messages from others
+      socketRef.current.on("receiveMessage", (data: { from: string; text: string; timestamp: number }) => {
+        setChats((prev) => {
+          const updated = new Map(prev);
+          const senderUserId = data.from;
+          if (!updated.has(senderUserId)) {
+            updated.set(senderUserId, { messages: [], open: true });
+          }
+          const chat = updated.get(senderUserId)!;
+          chat.messages.push(data);
+          chat.open = true; // Open chat when message arrives
+          return updated;
+        });
+      });
+
       socketRef.current.on("disconnect", (reason) => {
         setConnected(false);
 
@@ -103,6 +131,7 @@ export default function Home() {
           socketRef.current = null;
           setUsers([]);
           setUserId("");
+          setChats(new Map());
         }
       });
 
@@ -159,7 +188,73 @@ export default function Home() {
     setUserId("");
     setInputValue("");
     setUsers([]);
+    setChats(new Map());
   };
+
+  const handleOpenChat = (otherUserId: string) => {
+    setChats((prev) => {
+      const updated = new Map(prev);
+      if (!updated.has(otherUserId)) {
+        updated.set(otherUserId, { messages: [], open: true });
+      } else {
+        const chat = updated.get(otherUserId)!;
+        chat.open = true;
+      }
+      return updated;
+    });
+  };
+
+  const handleCloseChat = (otherUserId: string) => {
+    setChats((prev) => {
+      const updated = new Map(prev);
+      const chat = updated.get(otherUserId);
+      if (chat) {
+        chat.open = false;
+      }
+      return updated;
+    });
+  };
+
+  const handleSendMessage = useCallback(
+    (otherUserId: string, text: string) => {
+      if (socketRef.current) {
+        const timestamp = Date.now();
+        const messageData = {
+          from: userId,
+          text,
+          timestamp,
+        };
+
+        // Add message locally first (optimistic update)
+        setChats((prev) => {
+          const updated = new Map(prev);
+          if (!updated.has(otherUserId)) {
+            updated.set(otherUserId, { messages: [], open: true });
+          }
+          const chat = updated.get(otherUserId)!;
+          chat.messages.push(messageData);
+          return updated;
+        });
+
+        // Send to recipient via server
+        socketRef.current.emit("sendMessage", {
+          to: otherUserId,
+          from: userId,
+          text,
+        });
+      }
+    },
+    [userId]
+  );
+
+  // Get array of open chats in order (for positioning)
+  const openChats = Array.from(chats.entries())
+    .filter(([, chat]) => chat.open)
+    .map(([otherUserId, chat], index) => ({
+      otherUserId,
+      chat,
+      position: index,
+    }));
 
   return (
     <Box minH="100vh" bg="gray.50" py={12}>
@@ -170,7 +265,7 @@ export default function Home() {
               Socket.IO Live Users
             </Heading>
             <Text color="gray.500" fontSize="md">
-              Enter your ID to join and see who is connected
+              Enter your ID to join and see who is connected. Double-click a user to chat.
             </Text>
           </VStack>
 
@@ -261,6 +356,9 @@ export default function Home() {
                           border="1px solid"
                           borderColor={user === userId ? "teal.200" : "gray.200"}
                           gap={3}
+                          onDoubleClick={() => user !== userId && handleOpenChat(user)}
+                          cursor={user !== userId ? "pointer" : "default"}
+                          _hover={user !== userId ? { bg: "gray.100" } : {}}
                         >
                           <Box
                             w={8}
@@ -296,6 +394,21 @@ export default function Home() {
           </Card.Root>
         </VStack>
       </Container>
+
+      {/* Render open chat windows */}
+      <For each={openChats}>
+        {({ otherUserId, chat, position }) => (
+          <ChatWindow
+            key={otherUserId}
+            userId={userId}
+            otherUserId={otherUserId}
+            messages={chat.messages}
+            position={position}
+            onClose={() => handleCloseChat(otherUserId)}
+            onSendMessage={(text: string) => handleSendMessage(otherUserId, text)}
+          />
+        )}
+      </For>
     </Box>
   );
 }
