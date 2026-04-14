@@ -44,8 +44,11 @@ app.prepare().then(() => {
 
 
     io.on("connection", (socket) => {
-        const existingUser = tabToUser.get(socket.data.tabSessionId);
-        console.log(`New socket connection: ${socket.id} (tabSessionId: ${socket.data.tabSessionId}, existingUser: ${existingUser})`);
+        const { tabSessionId } = socket.handshake.auth as { tabSessionId: string };
+        socket.data.tabSessionId = tabSessionId;
+
+        const existingUser = tabToUser.get(tabSessionId);
+        console.log(`New socket connection: ${socket.id} (tabSessionId: ${tabSessionId}, existingUser: ${existingUser})`);
         if (existingUser) {
             const timer = disconnectTimers.get(existingUser);
             if (timer) {
@@ -56,8 +59,6 @@ app.prepare().then(() => {
         }
         const appSocket = socket as AppSocket;
         console.log(`Socket connected: ${socket.id}`);
-        const { tabSessionId } = socket.handshake.auth as { tabSessionId: string };
-        socket.data.tabSessionId = tabSessionId;
 
 
         if (!tabSessions.has(tabSessionId)) {
@@ -99,7 +100,6 @@ app.prepare().then(() => {
 
         socket.on("disconnect", () => {
             const tabSessionId = socket.data.tabSessionId;
-            const existingUser = tabToUser.get(socket.data.tabSessionId);
             const userId = tabToUser.get(tabSessionId);
             //socketToUser.delete(socket.id);
             // Do NOT delete tabToUser here — keep the mapping so that if the same
@@ -111,11 +111,19 @@ app.prepare().then(() => {
                 console.log(`Socket lost for: ${userId} — waiting ${GRACE_MS}ms before removing`);
                 // Delay removal to allow page-refresh reconnects on the same tab
                 const timer = setTimeout(() => {
-                    // Only remove if the tab hasn't reconnected (mapping still points to same user)
-                    if (tabToUser.get(tabSessionId) === userId) {
-                        tabToUser.delete(tabSessionId);
-                        tabSessions.delete(tabSessionId);
+                    const stillSameUser = tabToUser.get(tabSessionId) === userId;
+                    const tabReconnected = Array.from(io.sockets.sockets.values()).some(
+                        (connectedSocket) => connectedSocket.data.tabSessionId === tabSessionId
+                    );
+
+                    // If the tab has already reconnected, skip removal even if this timer wasn't canceled in time.
+                    if (!stillSameUser || tabReconnected) {
+                        disconnectTimers.delete(userId);
+                        return;
                     }
+
+                    tabToUser.delete(tabSessionId);
+                    tabSessions.delete(tabSessionId);
                     disconnectTimers.delete(userId);
                     userStore.remove(userId);
                     console.log(`User removed after grace period: ${userId}`);

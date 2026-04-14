@@ -23,7 +23,10 @@ const SESSION_TAB_ID = "tabSessionId"; // used to detect tab switches for the sa
 
 export default function Home() {
   const [userId, setUserId] = useState("");
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return sessionStorage.getItem(STORAGE_KEY) ?? "";
+  });
   const [users, setUsers] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -119,6 +122,17 @@ export default function Home() {
       setConnecting(false);
     }
   };
+
+  useEffect(() => {
+    const persistedUserId = sessionStorage.getItem(STORAGE_KEY);
+    if (!persistedUserId) return;
+
+    const timerId = window.setTimeout(() => {
+      void connectUser(persistedUserId);
+    }, 0);
+
+    return () => window.clearTimeout(timerId);
+  }, []);
 
   const handleConnect = () => connectUser(inputValue);
 
