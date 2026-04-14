@@ -82,12 +82,13 @@ app.prepare().then(() => {
             session.rooms.push(room);
         });
 
-        socket.on("sendMessage", (data: { to: string; text: string; from: string }) => {
+        socket.on("sendMessage", (data: { to: string; text: string; from: string; id?: string }) => {
             const recipientSocket = userToSocket.get(data.to);
             
             // Only send to recipient, sender already added locally
             if (recipientSocket) {
                 recipientSocket.emit("receiveMessage", {
+                    id: data.id,
                     from: data.from,
                     text: data.text,
                     timestamp: Date.now(),

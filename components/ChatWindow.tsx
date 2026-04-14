@@ -128,7 +128,7 @@ export function ChatWindow({
                             const isOwn = msg.from === userId;
                             return (
                                 <HStack
-                                    key={idx}
+                                    key={msg.id ?? idx}
                                     justify={isOwn ? "flex-end" : "flex-start"}
                                     w="100%"
                                 >

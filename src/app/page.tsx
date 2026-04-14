@@ -19,6 +19,7 @@ import {
 import { ChatWindow } from "../../components/ChatWindow";
 
 interface ChatMessage {
+  id?: string;
   from: string;
   text: string;
   timestamp: number;
@@ -219,7 +220,9 @@ export default function Home() {
     (otherUserId: string, text: string) => {
       if (socketRef.current) {
         const timestamp = Date.now();
+        const messageId = crypto.randomUUID();
         const messageData = {
+          id: messageId,
           from: userId,
           text,
           timestamp,
@@ -232,6 +235,9 @@ export default function Home() {
             updated.set(otherUserId, { messages: [], open: true });
           }
           const chat = updated.get(otherUserId)!;
+          if (chat.messages.some((message) => message.id === messageId)) {
+            return updated;
+          }
           chat.messages.push(messageData);
           return updated;
         });
@@ -241,6 +247,7 @@ export default function Home() {
           to: otherUserId,
           from: userId,
           text,
+          id: messageId,
         });
       }
     },
