@@ -20,6 +20,9 @@ export async function GET(_req: Request, { params }: Params) {
 export async function PUT(request: Request, { params }: Params) {
     const { id } = await params;
     const body = await request.json();
+    // Cancel any pending grace-period removal — this covers the page-refresh
+    // case where PUT fires before the new socket has had a chance to reconnect
+    cancelDisconnectTimer(id);
     const existing = userStore.get(id);
     const user = userStore.upsert(id, body.name ?? id);
     broadcastUsers(userStore.ids());

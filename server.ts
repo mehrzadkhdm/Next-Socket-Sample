@@ -1,25 +1,33 @@
 import { createServer } from "http";
 import { parse } from "url";
 import next from "next";
-import { Server as SocketIOServer } from "socket.io";
+import { Server as SocketIOServer, Socket } from "socket.io";
 import { userStore } from "./lib/userStore";
 import { setIO, disconnectTimers } from "./lib/ioInstance";
+
+interface TabSession {
+    userData: Record<string, unknown>;
+    rooms: string[];
+}
+
+// Extend Socket with our custom session property
+type AppSocket = Socket & { session: TabSession };
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
 const port = parseInt(process.env.PORT || "3000", 10);
 
 const app = next({ dev, hostname, port });
-const handle = app.getRequestHandler();
+const handler = app.getRequestHandler();
 
 // Map of socketId -> userId
-const socketToUser: Map<string, string> = new Map();
-const GRACE_MS = 500; // 15 seconds — enough for a full page refresh + reconnect
+//const socketToUser: Map<string, string> = new Map();
+const GRACE_MS = 2000; // 2 seconds — enough for a full page refresh + reconnect
 
 app.prepare().then(() => {
     const httpServer = createServer((req, res) => {
         const parsedUrl = parse(req.url!, true);
-        handle(req, res, parsedUrl);
+        handler(req, res, parsedUrl);
     });
 
     // Initialize Socket.IO once and share the instance with API routes
@@ -31,18 +39,57 @@ app.prepare().then(() => {
     });
     setIO(io);
 
+    const tabSessions = new Map<string, TabSession>();
+    const tabToUser = new Map<string, string>();
+
+
     io.on("connection", (socket) => {
+        const existingUser = tabToUser.get(socket.data.tabSessionId);
+        console.log(`New socket connection: ${socket.id} (tabSessionId: ${socket.data.tabSessionId}, existingUser: ${existingUser})`);
+        if (existingUser) {
+            const timer = disconnectTimers.get(existingUser);
+            if (timer) {
+                clearTimeout(timer);
+                disconnectTimers.delete(existingUser);
+                console.log(`Reconnect detected — cancelled removal for ${existingUser}`);
+            }
+        }
+        const appSocket = socket as AppSocket;
         console.log(`Socket connected: ${socket.id}`);
+        const { tabSessionId } = socket.handshake.auth as { tabSessionId: string };
+        socket.data.tabSessionId = tabSessionId;
+
+
+        if (!tabSessions.has(tabSessionId)) {
+            tabSessions.set(tabSessionId, {
+                userData: {},
+                rooms: []
+            });
+        }
+
+        const session = tabSessions.get(tabSessionId)!;
+        appSocket.session = session;
+        session.rooms.forEach(room => socket.join(room));
+
+        socket.on("setUserData", (data) => {
+            session.userData = data;
+        });
+
+        socket.on("joinRoom", (room) => {
+            socket.join(room);
+            session.rooms.push(room);
+        });
+
 
         socket.on("register", (userId: string) => {
-            socketToUser.set(socket.id, userId);
+            tabToUser.set(socket.data.tabSessionId, userId);
+            //socketToUser.set(socket.id, userId);
 
             // Cancel any pending removal for this user (tab-switch reconnect)
             const existing = disconnectTimers.get(userId);
             if (existing) {
                 clearTimeout(existing);
                 disconnectTimers.delete(userId);
-                console.log(`User reconnected, removal cancelled: ${userId}`);
             }
 
             userStore.upsert(userId, userId);
@@ -51,13 +98,24 @@ app.prepare().then(() => {
         });
 
         socket.on("disconnect", () => {
-            const userId = socketToUser.get(socket.id);
-            socketToUser.delete(socket.id);
-
+            const tabSessionId = socket.data.tabSessionId;
+            const existingUser = tabToUser.get(socket.data.tabSessionId);
+            const userId = tabToUser.get(tabSessionId);
+            //socketToUser.delete(socket.id);
+            // Do NOT delete tabToUser here — keep the mapping so that if the same
+            // tab reconnects before the grace period expires, "register" can cancel
+            // the timer. We clean it up only after the grace period confirms the
+            // tab is truly gone.
+            console.log(`Socket disconnected: ${socket.id} (user: ${userId})`);
             if (userId) {
                 console.log(`Socket lost for: ${userId} — waiting ${GRACE_MS}ms before removing`);
-                // Delay removal to allow tab-switch reconnects
+                // Delay removal to allow page-refresh reconnects on the same tab
                 const timer = setTimeout(() => {
+                    // Only remove if the tab hasn't reconnected (mapping still points to same user)
+                    if (tabToUser.get(tabSessionId) === userId) {
+                        tabToUser.delete(tabSessionId);
+                        tabSessions.delete(tabSessionId);
+                    }
                     disconnectTimers.delete(userId);
                     userStore.remove(userId);
                     console.log(`User removed after grace period: ${userId}`);
@@ -70,7 +128,15 @@ app.prepare().then(() => {
         });
     });
 
-    httpServer.listen(port, () => {
-        console.log(`> Ready on http://${hostname}:${port}`);
-    });
+    httpServer.once("error", (err) => {
+        if (err.name === "EADDRINUSE") {
+            console.error(`Port ${port} is already in use. Please free the port and try again.`);
+        } else {
+            console.error("Server error:", err);
+        }
+        process.exit(1);
+    })
+        .listen(port, () => {
+            console.log(`> Ready on http://${hostname}:${port}`);
+        });
 });

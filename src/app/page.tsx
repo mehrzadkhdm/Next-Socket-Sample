@@ -19,6 +19,7 @@ import {
 
 // sessionStorage is tab-scoped: each tab has its own independent user session
 const STORAGE_KEY = "socket_user_id";
+const SESSION_TAB_ID = "tabSessionId"; // used to detect tab switches for the same user
 
 export default function Home() {
   const [userId, setUserId] = useState("");
@@ -53,7 +54,17 @@ export default function Home() {
     }
 
     if (!socketRef.current) {
-      socketRef.current = io(window.location.origin);
+      let tabSessionId = sessionStorage.getItem(SESSION_TAB_ID);
+      if (!tabSessionId) {
+        tabSessionId = crypto.randomUUID();
+        sessionStorage.setItem(SESSION_TAB_ID, tabSessionId);
+      }
+
+      socketRef.current = io(window.location.origin, {
+        auth: { tabSessionId },
+      });
+
+      //socketRef.current = io(window.location.origin);
 
       // Fires on first connection AND after every automatic reconnect
       const onConnected = () => {
@@ -61,21 +72,35 @@ export default function Home() {
         setConnecting(false);
         setUserId(trimmed);
         setInputValue(trimmed);
+        let tabSessionId = sessionStorage.getItem(SESSION_TAB_ID);
+        if (!tabSessionId) {
+          tabSessionId = crypto.randomUUID();
+          sessionStorage.setItem(SESSION_TAB_ID, tabSessionId);
+        }
         sessionStorage.setItem(STORAGE_KEY, trimmed);
         socketRef.current!.emit("register", trimmed);
       };
 
       socketRef.current.on("connect", onConnected);
       // Socket.IO reconnect fires after the transport reconnects
-      socketRef.current.on("reconnect", onConnected);
+      // socketRef.current.on("reconnect", onConnected);
 
       socketRef.current.on("users", (userList: string[]) => {
         setUsers(userList);
       });
 
-      socketRef.current.on("disconnect", () => {
+      socketRef.current.on("disconnect", (reason) => {
         setConnected(false);
-        setUsers([]);
+
+        if (reason === "io server disconnect") {
+          // The server disconnected us, likely due to an invalid session.
+          // Clear local state so the user can try connecting again.
+          sessionStorage.removeItem(STORAGE_KEY);
+          sessionStorage.removeItem(SESSION_TAB_ID);
+          socketRef.current = null;
+          setUsers([]);
+          setUserId("");
+        }
       });
 
       socketRef.current.on("connect_error", () => {
@@ -84,6 +109,11 @@ export default function Home() {
     } else {
       setUserId(trimmed);
       setInputValue(trimmed);
+      let tabSessionId = sessionStorage.getItem(SESSION_TAB_ID);
+      if (!tabSessionId) {
+        tabSessionId = crypto.randomUUID();
+        sessionStorage.setItem(SESSION_TAB_ID, tabSessionId);
+      }
       sessionStorage.setItem(STORAGE_KEY, trimmed);
       socketRef.current.emit("register", trimmed);
       setConnecting(false);
@@ -105,6 +135,7 @@ export default function Home() {
     }
 
     sessionStorage.removeItem(STORAGE_KEY); // clear persisted state
+    //sessionStorage.removeItem(TAB_KEY); // clear tab session ID
 
     if (socketRef.current) {
       socketRef.current.disconnect();
