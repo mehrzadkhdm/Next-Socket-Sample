@@ -14,6 +14,7 @@ import {
 } from "@chakra-ui/react";
 
 export interface ChatMessage {
+    id?: string;
     from: string;
     text: string;
     timestamp: number;
@@ -37,12 +38,18 @@ export function ChatWindow({
     position = 0,
 }: ChatWindowProps) {
     const [inputValue, setInputValue] = useState("");
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
 
-    // Auto-scroll to bottom when new messages arrive
+    // Scroll to the latest message whenever count changes (send/receive)
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages]);
+        const container = messagesContainerRef.current;
+        if (!container) return;
+
+        container.scrollTo({
+            top: container.scrollHeight,
+            behavior: "smooth",
+        });
+    }, [messages.length]);
 
     const handleSendMessage = () => {
         if (inputValue.trim()) {
@@ -99,6 +106,7 @@ export function ChatWindow({
 
                 {/* Messages Container */}
                 <VStack
+                    ref={messagesContainerRef}
                     flex={1}
                     overflowY="auto"
                     p={3}
@@ -156,7 +164,6 @@ export function ChatWindow({
                             );
                         })
                     )}
-                    <div ref={messagesEndRef} />
                 </VStack>
 
                 {/* Input Area */}

@@ -107,7 +107,7 @@ export default function Home() {
       });
 
       // Listen for incoming messages from others
-      socketRef.current.on("receiveMessage", (data: { from: string; text: string; timestamp: number }) => {
+      socketRef.current.on("receiveMessage", (data: { id?: string; from: string; text: string; timestamp: number }) => {
         setChats((prev) => {
           const updated = new Map(prev);
           const senderUserId = data.from;
@@ -115,6 +115,9 @@ export default function Home() {
             updated.set(senderUserId, { messages: [], open: true });
           }
           const chat = updated.get(senderUserId)!;
+          if (data.id && chat.messages.some((message) => message.id === data.id)) {
+            return updated;
+          }
           chat.messages.push(data);
           chat.open = true; // Open chat when message arrives
           return updated;
